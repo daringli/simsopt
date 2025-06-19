@@ -83,6 +83,7 @@ PYBIND11_MODULE(simsoptpp, m) {
     m.def("WindingSurfaceBn_REGCOIL", &WindingSurfaceBn_REGCOIL);
     m.def("WindingSurfaceB", &WindingSurfaceB);
     m.def("WindingSurfacedB", &WindingSurfacedB);
+    m.def("WindingSurfaced2B", &WindingSurfaced2B);
     m.def("WindingSurfaceA", &WindingSurfaceA);
     m.def("WindingSurfacedA", &WindingSurfacedA);
     m.def("winding_surface_field_Bn", &winding_surface_field_Bn);

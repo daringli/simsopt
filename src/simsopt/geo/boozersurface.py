@@ -64,7 +64,7 @@ class BoozerSurface(Optimizable):
     for BoozerExact or BoozerLS surfaces.
     """
 
-    def __init__(self, biotsavart, surface, label, targetlabel, constraint_weight=None, options=None):
+    def __init__(self, biotsavart, surface, label, targetlabel, constraint_weight=None, options=None, vectorize=True):
         super().__init__(depends_on=[biotsavart])
 
         from simsopt.geo import SurfaceXYZFourier, SurfaceXYZTensorFourier
@@ -78,7 +78,9 @@ class BoozerSurface(Optimizable):
         self.constraint_weight = constraint_weight
         self.boozer_type = 'ls' if constraint_weight else 'exact'
         self.need_to_run_code = True
+        self.vectorize = vectorize
 
+        
         if options is None:
             options = {}
 
@@ -150,14 +152,14 @@ class BoozerSurface(Optimizable):
             # to generally result in solutions closer to optimality.
             res = self.minimize_boozer_penalty_constraints_LBFGS(constraint_weight=self.constraint_weight, iota=iota, G=G,
                                                                  tol=self.options['bfgs_tol'], maxiter=self.options['bfgs_maxiter'], verbose=self.options['verbose'], limited_memory=self.options['limited_memory'],
-                                                                 weight_inv_modB=self.options['weight_inv_modB'])
+                                                                 weight_inv_modB=self.options['weight_inv_modB'], vectorize=self.vectorize)
             iota, G = res['iota'], res['G']
 
             ## polish off using Newton's method
             self.need_to_run_code = True
             res = self.minimize_boozer_penalty_constraints_newton(constraint_weight=self.constraint_weight, iota=iota, G=G,
                                                                   verbose=self.options['verbose'], tol=self.options['newton_tol'], maxiter=self.options['newton_maxiter'],
-                                                                  weight_inv_modB=self.options['weight_inv_modB'])
+                                                                  weight_inv_modB=self.options['weight_inv_modB'], vectorize=self.vectorize)
             return res
 
     def boozer_penalty_constraints(self, x, derivatives=0, constraint_weight=1., scalarize=True, optimize_G=False, weight_inv_modB=True):

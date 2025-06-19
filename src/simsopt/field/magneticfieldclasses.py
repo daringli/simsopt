@@ -589,6 +589,14 @@ class WindingSurfaceField(MagneticField):
         self.nphi = len(current_potential.winding_surface.quadpoints_phi)
         self.ntheta = len(current_potential.winding_surface.quadpoints_theta)
 
+
+    def compute(self, deriv: int):
+        # needed for BoozerSurface 
+        pass
+
+    
+    
+        
     def _B_impl(self, B):
         points = self.get_points_cart_ref()
         B[:] = sopp.WindingSurfaceB(points, self.ws_points, self.ws_normal, self.K) / self.nphi / self.ntheta
@@ -601,6 +609,11 @@ class WindingSurfaceField(MagneticField):
         points = self.get_points_cart_ref()
         dB[:] = sopp.WindingSurfacedB(points, self.ws_points, self.ws_normal, self.K) / self.nphi / self.ntheta
 
+    def _d2B_by_dXdX_impl(self, d2B):
+        points = self.get_points_cart_ref()
+        d2B[:] = sopp.WindingSurfaced2B(points, self.ws_points, self.ws_normal, self.K) / self.nphi / self.ntheta
+
+        
     def _dA_by_dX_impl(self, dA):
         points = self.get_points_cart_ref()
         dA[:] = sopp.WindingSurfacedA(points, self.ws_points, self.ws_normal, self.K) / self.nphi / self.ntheta

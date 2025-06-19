@@ -190,10 +190,159 @@ Array WindingSurfacedB(Array& points, Array& ws_points, Array& ws_normal, Array&
             dB(i + k, 2, 0) = fak * dB_i3.x[k];
             dB(i + k, 2, 1) = fak * dB_i3.y[k];
             dB(i + k, 2, 2) = fak * dB_i3.z[k];
-	      }
+	}
     }
     return dB;
 }
+
+Array WindingSurfaced2B(Array& points, Array& ws_points, Array& ws_normal, Array& K)
+{
+    // warning: row_major checks below do NOT throw an error correctly on a compute node on Cori
+    if(points.layout() != xt::layout_type::row_major)
+          throw std::runtime_error("points needs to be in row-major storage order");
+    if(ws_points.layout() != xt::layout_type::row_major)
+          throw std::runtime_error("winding surface points needs to be in row-major storage order");
+    if(ws_normal.layout() != xt::layout_type::row_major)
+          throw std::runtime_error("winding surface normal vector needs to be in row-major storage order");
+    if(K.layout() != xt::layout_type::row_major)
+          throw std::runtime_error("surface_current needs to be in row-major storage order");
+
+    int num_points = points.shape(0);
+    int num_ws_points = ws_points.shape(0);
+    constexpr int simd_size = xsimd::simd_type<double>::size;
+    Array d2B        = xt::zeros<double>({points.shape(0), points.shape(1), points.shape(1), points.shape(1)});
+
+    // initialize pointer to the beginning of ws_points
+    double* ws_points_ptr = &(ws_points(0, 0));
+    double* ws_normal_ptr = &(ws_normal(0, 0));
+    double* K_ptr = &(K(0, 0));
+    double fak = 1e-7;  // mu0 divided by 4 * pi factor
+
+    // Loop through the evaluation points by chunks of simd_size
+    #pragma omp parallel for schedule(static)
+    for(int i = 0; i < num_points; i += simd_size) {
+        auto point_i = Vec3dSimd();
+        auto d2B_ixx = Vec3dSimd();
+        auto d2B_ixy = Vec3dSimd();
+        auto d2B_ixz = Vec3dSimd();
+	auto d2B_iyx = Vec3dSimd();
+        auto d2B_iyy = Vec3dSimd();
+        auto d2B_iyz = Vec3dSimd();
+	auto d2B_izx = Vec3dSimd();
+        auto d2B_izy = Vec3dSimd();
+        auto d2B_izz = Vec3dSimd();
+	d2B_ixx *= 0.;
+        d2B_ixy *= 0.;
+        d2B_ixz *= 0.;
+	d2B_iyx *= 0.;
+        d2B_iyy *= 0.;
+        d2B_iyz *= 0.;
+	d2B_izx *= 0.;
+        d2B_izy *= 0.;
+        d2B_izz *= 0.;
+	
+	
+        // check that i + k isn't bigger than num_points
+        int klimit = std::min(simd_size, num_points - i);
+        for(int k = 0; k < klimit; k++){
+            for (int d = 0; d < 3; ++d) {
+                point_i[d][k] = points(i + k, d);
+            }
+        }
+        // Sum contributions from all the winding surface points
+        // i.e. do the surface integral over the winding surface
+        for (int j = 0; j < num_ws_points; ++j) {
+            Vec3dSimd r_j = Vec3dSimd(ws_points_ptr[3 * j + 0], ws_points_ptr[3 * j + 1], ws_points_ptr[3 * j + 2]);
+            Vec3dSimd n_j = Vec3dSimd(ws_normal_ptr[3 * j + 0], ws_normal_ptr[3 * j + 1], ws_normal_ptr[3 * j + 2]);
+            Vec3dSimd K_j = Vec3dSimd(K_ptr[3 * j + 0], K_ptr[3 * j + 1], K_ptr[3 * j + 2]);
+            Vec3dSimd r = point_i - r_j;
+            simd_t rmag_2     = normsq(r);
+            simd_t rmag_inv   = rsqrt(rmag_2);
+            simd_t rmag_inv_5 = rmag_inv * rmag_inv * rmag_inv * rmag_inv * rmag_inv;
+	    simd_t rmag_inv_7 = rmag_inv_5 * rmag_inv * rmag_inv;
+            simd_t nmag = sqrt(normsq(n_j));
+            Vec3dSimd Kcrossr = cross(K_j, r);
+            Vec3dSimd ex = Vec3dSimd(1, 0, 0);
+            Vec3dSimd ey = Vec3dSimd(0, 1, 0);
+            Vec3dSimd ez = Vec3dSimd(0, 0, 1);
+            Vec3dSimd Kcrossex = cross(K_j, ex);
+            Vec3dSimd Kcrossey = cross(K_j, ey);
+            Vec3dSimd Kcrossez = cross(K_j, ez);
+            d2B_ixx.x += -3.0 * nmag * rmag_inv_5 * (Kcrossex.x * r.x + Kcrossex.x * r.x + Kcrossr.x) + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.x * r.x;
+	    d2B_ixx.y += -3.0 * nmag * rmag_inv_5 * (Kcrossex.y * r.x + Kcrossex.y * r.x + Kcrossr.y) + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.x * r.x;
+	    d2B_ixx.z += -3.0 * nmag * rmag_inv_5 * (Kcrossex.z * r.x + Kcrossex.z * r.x + Kcrossr.z) + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.x * r.x;
+
+	    d2B_ixy.x += -3.0 * nmag * rmag_inv_5 * (Kcrossex.x * r.y + Kcrossey.x * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.x * r.y;
+	    d2B_ixy.y += -3.0 * nmag * rmag_inv_5 * (Kcrossex.y * r.y + Kcrossey.y * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.x * r.y;
+	    d2B_ixy.z += -3.0 * nmag * rmag_inv_5 * (Kcrossex.z * r.y + Kcrossey.z * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.x * r.y;
+
+	    d2B_ixz.x += -3.0 * nmag * rmag_inv_5 * (Kcrossex.x * r.z + Kcrossez.x * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.x * r.z;
+	    d2B_ixz.y += -3.0 * nmag * rmag_inv_5 * (Kcrossex.y * r.z + Kcrossez.y * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.x * r.z;
+	    d2B_ixz.z += -3.0 * nmag * rmag_inv_5 * (Kcrossex.z * r.z + Kcrossez.z * r.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.x * r.z;
+
+	    d2B_iyx.x += -3.0 * nmag * rmag_inv_5 * (Kcrossey.x * r.x + Kcrossex.x * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.y * r.x;
+	    d2B_iyx.y += -3.0 * nmag * rmag_inv_5 * (Kcrossey.y * r.x + Kcrossex.y * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.y * r.x;
+	    d2B_iyx.z += -3.0 * nmag * rmag_inv_5 * (Kcrossey.z * r.x + Kcrossex.z * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.y * r.x;
+
+	    d2B_iyy.x += -3.0 * nmag * rmag_inv_5 * (Kcrossey.x * r.y + Kcrossey.x * r.y + Kcrossr.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.y * r.y;
+	    d2B_iyy.y += -3.0 * nmag * rmag_inv_5 * (Kcrossey.y * r.y + Kcrossey.y * r.y + Kcrossr.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.y * r.y;
+	    d2B_iyy.z += -3.0 * nmag * rmag_inv_5 * (Kcrossey.z * r.y + Kcrossey.z * r.y + Kcrossr.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.y * r.y;
+	    d2B_iyz.x += -3.0 * nmag * rmag_inv_5 * (Kcrossey.x * r.z + Kcrossez.x * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.y * r.z;
+	    d2B_iyz.y += -3.0 * nmag * rmag_inv_5 * (Kcrossey.y * r.z + Kcrossez.y * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.y * r.z;
+	    d2B_iyz.z += -3.0 * nmag * rmag_inv_5 * (Kcrossey.z * r.z + Kcrossez.z * r.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.y * r.z;
+
+	    d2B_izx.x += -3.0 * nmag * rmag_inv_5 * (Kcrossez.x * r.x + Kcrossex.x * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.z * r.x;
+	    d2B_izx.y += -3.0 * nmag * rmag_inv_5 * (Kcrossez.y * r.x + Kcrossex.y * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.z * r.x;
+	    d2B_izx.z += -3.0 * nmag * rmag_inv_5 * (Kcrossez.z * r.x + Kcrossex.z * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.z * r.x;
+
+	    d2B_izy.x += -3.0 * nmag * rmag_inv_5 * (Kcrossez.x * r.y + Kcrossey.x * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.z * r.y;
+	    d2B_izy.y += -3.0 * nmag * rmag_inv_5 * (Kcrossez.y * r.y + Kcrossey.y * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.z * r.y;
+	    d2B_izy.z += -3.0 * nmag * rmag_inv_5 * (Kcrossez.z * r.y + Kcrossey.z * r.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.z * r.y;
+
+	    d2B_izz.x += -3.0 * nmag * rmag_inv_5 * (Kcrossez.x * r.z + Kcrossez.x * r.z + Kcrossr.x)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.x * r.z * r.z;
+	    d2B_izz.y += -3.0 * nmag * rmag_inv_5 * (Kcrossez.y * r.z + Kcrossez.y * r.z + Kcrossr.y)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.y * r.z * r.z;
+	    d2B_izz.z += -3.0 * nmag * rmag_inv_5 * (Kcrossez.z * r.z + Kcrossez.z * r.z + Kcrossr.z)  + 15.0 * nmag * rmag_inv_7 * Kcrossr.z * r.z * r.z;
+        }
+        for(int k = 0; k < klimit; k++){
+	  // 'i' only increments in simd chunks so this 'k' loop fills in the rest of the points
+	  // the last chunk may have fewer points so klimit varies
+          
+	  d2B(i + k, 0, 0, 0) = fak * d2B_ixx.x[k];
+	  d2B(i + k, 0, 0, 1) = fak * d2B_ixx.y[k];
+	  d2B(i + k, 0, 0, 2) = fak * d2B_ixx.z[k];
+	  d2B(i + k, 0, 1, 0) = fak * d2B_ixy.x[k];
+	  d2B(i + k, 0, 1, 1) = fak * d2B_ixy.y[k];
+	  d2B(i + k, 0, 1, 2) = fak * d2B_ixy.z[k];
+	  d2B(i + k, 0, 2, 0) = fak * d2B_ixz.x[k];
+	  d2B(i + k, 0, 2, 1) = fak * d2B_ixz.y[k];
+	  d2B(i + k, 0, 2, 2) = fak * d2B_ixz.z[k];
+
+	  d2B(i + k, 1, 0, 0) = fak * d2B_iyx.x[k];
+	  d2B(i + k, 1, 0, 1) = fak * d2B_iyx.y[k];
+	  d2B(i + k, 1, 0, 2) = fak * d2B_iyx.z[k];
+	  d2B(i + k, 1, 1, 0) = fak * d2B_iyy.x[k];
+	  d2B(i + k, 1, 1, 1) = fak * d2B_iyy.y[k];
+	  d2B(i + k, 1, 1, 2) = fak * d2B_iyy.z[k];
+	  d2B(i + k, 1, 2, 0) = fak * d2B_iyz.x[k];
+	  d2B(i + k, 1, 2, 1) = fak * d2B_iyz.y[k];
+	  d2B(i + k, 1, 2, 2) = fak * d2B_iyz.z[k];
+	  
+	  
+	  d2B(i + k, 2, 0, 0) = fak * d2B_izx.x[k];
+	  d2B(i + k, 2, 0, 1) = fak * d2B_izx.y[k];
+	  d2B(i + k, 2, 0, 2) = fak * d2B_izx.z[k];
+	  d2B(i + k, 2, 1, 0) = fak * d2B_izy.x[k];
+	  d2B(i + k, 2, 1, 1) = fak * d2B_izy.y[k];
+	  d2B(i + k, 2, 1, 2) = fak * d2B_izy.z[k];
+	  d2B(i + k, 2, 2, 0) = fak * d2B_izz.x[k];
+	  d2B(i + k, 2, 2, 1) = fak * d2B_izz.y[k];
+	  d2B(i + k, 2, 2, 2) = fak * d2B_izz.z[k];
+
+	      }
+    }
+    return d2B;
+}
+
 
 Array WindingSurfaceA(Array& points, Array& ws_points, Array& ws_normal, Array& K)
 {
