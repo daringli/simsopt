@@ -48,6 +48,11 @@ class CurrentPotentialSolve:
         B_GI_vector = Bfield.B()
         normal = plasma_surface.unitnormal().reshape(-1, 3)
         B_GI_winding_surface = np.sum(B_GI_vector*normal, axis=1)
+        abs_B_GI = np.sqrt(np.sum(B_GI_vector**2, axis=1))
+        self.min_abs_B_GI = np.min(abs_B_GI)
+        self.max_abs_B_GI = np.max(abs_B_GI)
+
+        
         # Permitting Bnormal_plasma to be a scalar
         if np.isscalar(Bnormal_plasma):
             Bnormal_plasma = Bnormal_plasma * np.ones(normal.shape[0])
