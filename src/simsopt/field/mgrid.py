@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.io import netcdf_file
+from ..util.netcdf import netcdf_file
 
 __all__ = ["MGrid"]
 

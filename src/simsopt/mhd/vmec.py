@@ -12,7 +12,7 @@ from typing import Optional
 from datetime import datetime
 
 import numpy as np
-from scipy.io import netcdf_file
+from ..util.netcdf import netcdf_file
 from scipy.integrate import quad
 
 logger = logging.getLogger(__name__)
